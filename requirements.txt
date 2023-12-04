@@ -1,0 +1,4 @@
+cupy_cuda11x==12.2.0
+numpy==1.26.1
+opencv_python==4.8.1.78
+tk==8.6
