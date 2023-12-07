@@ -46,7 +46,7 @@ def numpyStitch(imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentage
             x, align_img1, align_output = findHOverlapNotAlignIndex(output, img1, img1_left_pixel, 
                                                                       img0_right_cnt, math.floor(h*checkYAlignmentPercent),
                                                                       img0_right_index, PoseDict)
-            OverlapXIndexList.append(x)
+            OverlapXIndexList.append(int(x))
             tempOut = cv2.hconcat([align_output[:,:int(x)],align_img1])
             output = blendSeamlessCloneX(tempOut, align_output, x, align_output.shape[1])
          
@@ -228,7 +228,7 @@ def blendSeamlessCloneX(tempOut, align_output, x, w):
     output_img = cv2.cvtColor(output_img,cv2.COLOR_BGR2GRAY)
     return output_img
 
-def blendSeamlessCloneYCu(tempOut, align_output, y, h):
+def blendSeamlessCloneY(tempOut, align_output, y, h):
     height_to_blend = math.floor(h*0.1)
     if h-height_to_blend < 0:
         height_to_blend = y;
@@ -273,7 +273,7 @@ def cupyStitch(imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentageT
             x, align_img1, align_output = findHOverlapNotAlignIndexCu(output, img1, img1_left_pixel, 
                                                                       img0_right_cnt, math.floor(h*checkYAlignmentPercent),
                                                                       img0_right_index, PoseDict)
-            OverlapXIndexList.append(x)
+            OverlapXIndexList.append(int(x))
             tempOut = cp.hstack([align_output[:,:int(x)],align_img1])
             output = blendSeamlessCloneXCu(tempOut, align_output, int(x), align_output.shape[1])
             
