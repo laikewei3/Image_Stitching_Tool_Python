@@ -1,6 +1,4 @@
-from cgitb import text
-import stat
-from sys import getsizeof
+from re import I
 import numpy as np
 import cupy as cp
 import cv2
@@ -8,14 +6,8 @@ import time
 import os
 import math
 from tkinter import filedialog, simpledialog,messagebox,Label,Tk,Button,IntVar,Radiobutton
-from tkinter.ttk import Progressbar
 import json
 
-st = time.time()
-PoseDictList = []
-ProcessTimeList = []
-OverlapXIndexList = []
-OverlapYIndexList = []
 # ==================================================== Numpy Methods ================================================================
 
 def numpyStitch(imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentageTB, checkYAlignmentPercent, checkXAlignmentPercent):
@@ -79,7 +71,7 @@ def numpyStitch(imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentage
                                                                       img0_bottom_index, PoseDict)
             OverlapYIndexList.append(int(y))
             tempOut = cv2.vconcat([align_output[:y,:],align_img1])
-            output = blendSeamlessCloneY(tempOut, align_output, y, align_output.shape[0])
+            output = tempOut#blendSeamlessCloneY(tempOut, align_output, y, align_output.shape[0])
         
         PrevOutput = output
         PoseDictList.append(PoseDict)
@@ -246,6 +238,9 @@ def blendSeamlessCloneY(tempOut, align_output, y, h):
 
 # ==================================================== Cupy Methods =================================================================
 def cupyStitch(imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentageTB, checkYAlignmentPercent, checkXAlignmentPercent):
+    global processedRow
+    global processedCol
+    processedRow = 0
     for row in range(ImgsRows):
         PoseDict = {
         "Up": 0,
@@ -254,8 +249,8 @@ def cupyStitch(imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentageT
         "Right": 0
         }
         output =  cp.array(imgs[ImgsCols*row])
-        print(getsizeof(output))
         st = time.time()
+        processedCol = 0
         for col in range(1, ImgsCols):
             img1 = cp.array(imgs[ImgsCols*row+col])
             w = img1.shape[1]
@@ -266,16 +261,21 @@ def cupyStitch(imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentageT
             
             h = img1.shape[0]
             
-            img0_right_index = output.shape[1] - math.floor(w*overlapPercentageLR)
+            #img0_right_index = output.shape[1] - math.floor(w*overlapPercentageLR)
             img1_left_pixel = math.floor(w*(overlapPercentageLR/5))
-           
-            img0_right_cnt = output.shape[1] - img0_right_index
-            x, align_img1, align_output = findHOverlapNotAlignIndexCu(output, img1, img1_left_pixel, 
+            value = math.floor(w*overlapPercentageLR)
+            img0_right_cnt = value if output.shape[1] - img1_left_pixel >= value else output.shape[1]
+            img0_right_index = output.shape[1] - img0_right_cnt
+            
+            x, align_img1, align_output, movementY = findHOverlapNotAlignIndexCu(output, img1, img1_left_pixel, 
                                                                       img0_right_cnt, math.floor(h*checkYAlignmentPercent),
                                                                       img0_right_index, PoseDict)
             OverlapXIndexList.append(int(x))
-            tempOut = cp.hstack([align_output[:,:int(x)],align_img1])
-            output = blendSeamlessCloneXCu(tempOut, align_output, int(x), align_output.shape[1])
+            #tempOut = cp.hstack([align_output[:,:int(x)],align_img1])
+            #output = blendSeamlessCloneXCu(tempOut, align_output, int(x), w, movementY, PoseDict)
+            output = blendAlphaXCu(align_img1, align_output,x,w,movementY,PoseDict)
+            
+            processedCol+=1
             
         if row > 0:
             tmpLEFT = cp.zeros((output.shape[0],PoseDictList[row-1]["Left"]))
@@ -296,31 +296,34 @@ def cupyStitch(imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentageT
                 temp = cp.zeros((PrevOutput_h,diff))
                 PrevOutput = cp.hstack([PrevOutput,temp])
             
-            img0_bottom_index = PrevOutput.shape[0] - math.floor(output.shape[0]*overlapPercentageTB)
-            img1_top_pixel = math.floor(output.shape[0]*overlapPercentageTB/2)
-        
-            img0_bottom_cnt = PrevOutput.shape[0] - img0_bottom_index
-            y, align_img1, align_output = findVOverlapNotAlignIndexCu(PrevOutput, output, 
+            img1_top_pixel = math.floor(output.shape[0]*overlapPercentageTB/5)
+            value = math.floor(output.shape[0]*overlapPercentageTB)
+            img0_bottom_cnt = value if PrevOutput.shape[0] - img1_top_pixel >= value else PrevOutput.shape[0]
+            img0_bottom_index = PrevOutput.shape[0] - img0_bottom_cnt
+            
+            y, align_img1, align_output, movementX = findVOverlapNotAlignIndexCu(PrevOutput, output, 
                                                                       img1_top_pixel, img0_bottom_cnt, 
                                                                       math.floor(output.shape[1] * checkXAlignmentPercent), 
                                                                       img0_bottom_index, PoseDict)
             OverlapYIndexList.append(int(y))
-            tempOut = cp.vstack([align_output[:y,:],align_img1])
-            output = blendSeamlessCloneYCu(tempOut, align_output, y, align_output.shape[0])
+            output = blendAlphaYCu(align_img1, align_output, y, output.shape[0], movementX, PoseDict, PoseDictList[row-1])
+            #tempOut = cp.vstack([align_output[:y,:],align_img1])
+            #output = blendSeamlessCloneYCu(tempOut, align_output, y, h, movementX, PoseDict)
         
         PrevOutput = output
         PoseDictList.append(PoseDict)
         et = time.time()
         ProcessTimeList.append(et-st)
         st = time.time()
+        processedRow += 1
             
     return output
 
-def findHOverlapIndexCu(output_right, img1_left, img1_left_pixel, img0_right_cnt):
-    sqdif_arr = cp.zeros(img0_right_cnt-img1_left_pixel, float)
+def findHOverlapIndexCu(output_right, img1_left, img1_left_pixel, img0_right_cnt, min_overlap_count = 0):
+    sqdif_arr = cp.zeros(img0_right_cnt-img1_left_pixel-min_overlap_count, float)
     shape = img1_left.shape
     print("Finding Overlap using Cuda......")
-    for x in range(img0_right_cnt - img1_left_pixel):
+    for x in range(min_overlap_count, img0_right_cnt - img1_left_pixel):
         #diff = output_right[:,x:x+img1_left_pixel] - img1_left
         #sum_sqdif = cp.sum(diff*diff)
         diffT = output_right[:math.floor(shape[0]*0.2),x:x+img1_left_pixel] - img1_left[:math.floor(shape[0]*0.2),:]
@@ -330,10 +333,10 @@ def findHOverlapIndexCu(output_right, img1_left, img1_left_pixel, img0_right_cnt
         sum_sqdifM = cp.sum(diffM*diffM)
         sum_sqdifB = cp.sum(diffB*diffB)
         sum_sqdif = sum_sqdifT + sum_sqdifB + sum_sqdifM
-        sqdif_arr[x] = sum_sqdif
+        sqdif_arr[x-min_overlap_count] = sum_sqdif
     
     print()
-    return int(cp.where(sqdif_arr == sqdif_arr.min())[0][0])
+    return int(cp.where(sqdif_arr == sqdif_arr.min())[0][0]) + min_overlap_count
 
 def findHOverlapNotAlignIndexCu(output, img1, img1_left_pixel, img0_right_cnt, check_y_align_pixel_cnt, img0_right_index, PoseDict):
     output_right = output[PoseDict["Down"]:output.shape[0]-PoseDict["Up"],img0_right_index:]
@@ -344,7 +347,6 @@ def findHOverlapNotAlignIndexCu(output, img1, img1_left_pixel, img0_right_cnt, c
     [y diff value, x -> the best overlap x position when in this y value]
     '''
     h = img1_left.shape[0]
-    w = img1_left.shape[1]
     for j in range(check_y_align_pixel_cnt):
         print("Checking Align using Cuda")
         img1DOWN = img1_left[:h-j,:] # cut down part (add black row at top) -> move down
@@ -354,12 +356,21 @@ def findHOverlapNotAlignIndexCu(output, img1, img1_left_pixel, img0_right_cnt, c
             img1DOWN = cp.vstack([temp,img1DOWN])
             img1UP = cp.vstack([img1UP,temp])
        
-        xDOWN = findHOverlapIndexCu(output_right[j:,:], img1DOWN[j:,:], img1_left_pixel, img0_right_cnt)+img0_right_index
-        xUP = findHOverlapIndexCu(output_right[:h-j,:], img1UP[:h-j,:], img1_left_pixel, img0_right_cnt)+img0_right_index
+        xDOWN = findHOverlapIndexCu(output_right[j:,:], img1DOWN[j:,:], img1_left_pixel, img0_right_cnt, math.floor(img1.shape[1]*minOverlap))+img0_right_index
+        xUP = findHOverlapIndexCu(output_right[:h-j,:], img1UP[:h-j,:], img1_left_pixel, img0_right_cnt, math.floor(img1.shape[1]*minOverlap))+img0_right_index
+        '''
+        s = time.time()
+        #diffDOWN = output_right[j:j+math.floor(h*0.2),xDOWN-img0_right_index:xDOWN-img0_right_index+img1_left_pixel] - img1DOWN[j:j+math.floor(h*0.2),:]
+        #diffUP = output_right[h - math.floor(h*0.2) - j:h-j,xUP-img0_right_index:xUP-img0_right_index+img1_left_pixel] - img1UP[h - math.floor(h*0.2) - j:h-j,:]
+        
+        sum_sqdifDOWN = cp.sum(diffDOWN*diffDOWN)
+        sum_sqdifUP = cp.sum(diffUP*diffUP)
+        
+        test+=time.time()-s'''
+        
         
         diffDOWN = output_right[j:,xDOWN-img0_right_index:xDOWN-img0_right_index+img1_left_pixel] - img1DOWN[j:,:]
         diffUP = output_right[:h-j,xUP-img0_right_index:xUP-img0_right_index+img1_left_pixel] - img1UP[:h-j,:]
-        
         sum_sqdifDOWN = cp.sum(diffDOWN*diffDOWN)
         sum_sqdifUP = cp.sum(diffUP*diffUP)
         
@@ -371,58 +382,69 @@ def findHOverlapNotAlignIndexCu(output, img1, img1_left_pixel, img0_right_cnt, c
     
     index = int(cp.where(sqdif_arr[:,0] == sqdif_arr[:,0].min())[0][0])
     
+    movement = []
     if index >= check_y_align_pixel_cnt:
-        temp1 = cp.zeros((index-check_y_align_pixel_cnt,img1.shape[1]))
-        temp2 = cp.zeros((index-check_y_align_pixel_cnt,output.shape[1]))
+        v = index-check_y_align_pixel_cnt
+        temp1 = cp.zeros((v,img1.shape[1]))
+        temp2 = cp.zeros((v,output.shape[1]))
         align_img1 = cp.vstack([img1,temp1])
         align_output = cp.vstack([temp2,output])
-        PoseDict["Up"] += index-check_y_align_pixel_cnt
+        PoseDict["Up"] += v
+        movement.append("Up")
+        movement.append(v)
     else:
         temp1 = cp.zeros((index,img1.shape[1]))
         temp2 = cp.zeros((index,output.shape[1]))
         align_img1 = cp.vstack([temp1,img1])
         align_output = cp.vstack([output,temp2])
         PoseDict["Down"] += index
+        movement.append("Down")
+        movement.append(index)
         
-    return sqdif_arr[index,1], align_img1, align_output
+    return sqdif_arr[index,1], align_img1, align_output, movement
 
-def findVOverlapIndexCu(output_bottom, img1_top, img1_top_pixel, img0_bottom_cnt):
+def findVOverlapIndexCu(output_bottom, img1_top, img1_top_pixel, img0_bottom_cnt, min_overlap_count = 0):
     sqdif_arr = cp.zeros(img0_bottom_cnt-img1_top_pixel)
     print("Finding Y Overlap using Cuda......")
     shape = img1_top.shape
-    for y in range(img0_bottom_cnt - img1_top_pixel):
+    value = math.floor(shape[1]*0.2)
+    if value > 10000:
+        value = 10000
+    for y in range(min_overlap_count, img0_bottom_cnt - img1_top_pixel):
+        '''
         #diff = output_bottom[y:y+img1_top_pixel,:] - img1_top
-        #sum_sqdif = cp.sum(diff*diff)
-        diffL = output_bottom[y:y+img1_top_pixel,:math.floor(shape[1]*0.2)] - img1_top[:,:math.floor(shape[1]*0.2)]
-        diffM = output_bottom[y:y+img1_top_pixel,int(shape[1]//2 - shape[1]*0.1):int(shape[1]//2 + shape[1]*0.1)] - img1_top[:,int(shape[1]//2 - shape[1]*0.1):int(shape[1]//2 + shape[1]*0.1)]
-        diffR = output_bottom[y:y+img1_top_pixel, math.floor(shape[1] - shape[1]*0.2):] - img1_top[:, math.floor(shape[1] - shape[1]*0.2):]
+        sum_sqdif = cp.sum(diff*diff)
+        '''
+        diffL = output_bottom[y:y+img1_top_pixel,:value] - img1_top[:,:value]
+        diffM = output_bottom[y:y+img1_top_pixel,shape[1]//2 - value//2:shape[1]//2 + value//2] - img1_top[:,shape[1]//2 - value//2:shape[1]//2 + value//2]
+        diffR = output_bottom[y:y+img1_top_pixel, shape[1]-value:] - img1_top[:, shape[1]-value:]
         sum_sqdifL = cp.sum(diffL*diffL)
         sum_sqdifM = cp.sum(diffM*diffM)
         sum_sqdifR = cp.sum(diffR*diffR)
         sum_sqdif = sum_sqdifL+sum_sqdifM+sum_sqdifR
-        sqdif_arr[y] = sum_sqdif
+        sqdif_arr[y+min_overlap_count] = sum_sqdif
     print()
-    return cp.where(sqdif_arr == sqdif_arr.min())[-1][0]
+    return int(cp.where(sqdif_arr == sqdif_arr.min())[0][0])+min_overlap_count
 
 def findVOverlapNotAlignIndexCu(output, img1, img1_top_pixel, img0_bottom_cnt, check_x_align_pixel_cnt, img0_bottom_index, PoseDict):
+    output_bottom = equaliseCupyImage(output[img0_bottom_index:,PoseDict["Right"]:output.shape[1]-PoseDict["Left"]])
+    img1_top = equaliseCupyImage(img1[:img1_top_pixel, PoseDict["Right"]:img1.shape[1]-PoseDict["Left"]])
     
-    output_bottom = output[img0_bottom_index:,PoseDict["Right"]:output.shape[1]-PoseDict["Left"]]
-    img1_top = img1[:img1_top_pixel, PoseDict["Right"]:img1.shape[1]-PoseDict["Left"]]
-    
-    print("Start Check X Align")
+    print(str(processedRow)+"-"+str(processedCol),": Start Check X Align")
     sqdif_arr = cp.zeros((check_x_align_pixel_cnt*2, 2), float)
     '''
     [x diff value, y -> the best overlap y position when in this x value]
     '''
     w = img1_top.shape[1]
     for j in range(check_x_align_pixel_cnt):
-        print("Checking X Align")
+        print(str(processedRow)+"-"+str(processedCol),": Checking X Align")
         img1RIGHT = img1_top[:,:w-j] # cut right part (add black row at left) -> move right
         img1LEFT = img1_top[:,j:] # cut left part (add black row at right) -> move left
         if j > 0:
             temp = cp.zeros((img1_top_pixel,j))
             img1RIGHT = cp.hstack([temp,img1RIGHT])
             img1LEFT = cp.hstack([img1LEFT,temp])
+            
         yRIGHT = findVOverlapIndexCu(output_bottom[:,j:], img1RIGHT[:,j:], img1_top_pixel, img0_bottom_cnt)+img0_bottom_index
         yLEFT = findVOverlapIndexCu(output_bottom[:,:w-j], img1LEFT[:,:w-j], img1_top_pixel, img0_bottom_cnt)+img0_bottom_index
         
@@ -431,6 +453,7 @@ def findVOverlapNotAlignIndexCu(output, img1, img1_top_pixel, img0_bottom_cnt, c
         
         sum_sqdifRIGHT = cp.sum(diffRIGHT*diffRIGHT)
         sum_sqdifLEFT = cp.sum(diffLEFT*diffLEFT)
+       
         
         sqdif_arr[j,0] = sum_sqdifRIGHT
         sqdif_arr[j+check_x_align_pixel_cnt,0] = sum_sqdifLEFT
@@ -439,30 +462,56 @@ def findVOverlapNotAlignIndexCu(output, img1, img1_top_pixel, img0_bottom_cnt, c
         sqdif_arr[j+check_x_align_pixel_cnt,1] = yLEFT
        
     index = int(cp.where(sqdif_arr[:,0] == sqdif_arr[:,0].min())[0][0])
-    
+    movement = []
     # Align by adding black pixel at left/right
     if index >= check_x_align_pixel_cnt:
-        temp1 = cp.zeros((img1.shape[0], index-check_x_align_pixel_cnt))
-        temp2 = cp.zeros((output.shape[0], index-check_x_align_pixel_cnt))
+        v = index-check_x_align_pixel_cnt
+        temp1 = cp.zeros((img1.shape[0], v))
+        temp2 = cp.zeros((output.shape[0], v))
         align_img1 = cp.hstack([img1,temp1])
         align_output = cp.hstack([temp2,output])
-        PoseDict["Left"] += index-check_x_align_pixel_cnt
+        PoseDict["Left"] += v
+        movement.append("LEFT")
+        movement.append(v)
     else:
         temp1 = cp.zeros((img1.shape[0],index))
         temp2 = cp.zeros((output.shape[0],index))
         align_img1 = cp.hstack([temp1,img1])
         align_output = cp.hstack([output,temp2])
         PoseDict["Right"] += index
+        movement.append("Right")
+        movement.append(index)
     
-    return sqdif_arr[index,1], align_img1, align_output
+    return sqdif_arr[index,1], align_img1, align_output, movement
 
-def blendSeamlessCloneXCu(tempOut, align_output, x, w):
-    width_to_blend = math.floor(w*0.02)
+'''
+SRC:
+0      10      5       15      20    30  
+0      10      15      30      20    35
+       U       U       D       U     D
+       10      5       15      5     15
+       U10     U15     U15     U20   U20   
+       D0      D0      D15     D15   D30	
+
+U - WHEN U, U CURR + D TOTAL; WHEN D, D TOTAL
+D - WHEN D, D CURR + U TOTAL; WHEN U, U TOTAL
+
+'''
+def blendSeamlessCloneXCu(tempOut, align_output, x, w, movementY, PoseDict):
+    width_to_blend = math.floor(w*0.015)
+    if movementY[0] == "UP":
+        U = movementY[1] + PoseDict["Down"]
+        D = align_output.shape[0] - PoseDict["UP"]
+    else:
+        U = PoseDict["Down"]
+        D = align_output.shape[0] - movementY[1]
+
     if x-width_to_blend < 0:
         width_to_blend = x;
-    if x+width_to_blend >= w:
-        width_to_blend = w-x;
-    src = align_output[:,int(x)-width_to_blend:int(x)+width_to_blend]
+    if x+width_to_blend >= align_output.shape[1]:
+        width_to_blend = align_output.shape[1]-x;
+    
+    src = align_output[U:D,int(x)-width_to_blend:int(x)+width_to_blend]
     mask = 255*np.ones(src.shape, np.uint8)
     tempOut = cp.asnumpy(tempOut)
     tempOut = tempOut.astype('uint8')
@@ -470,19 +519,27 @@ def blendSeamlessCloneXCu(tempOut, align_output, x, w):
     src = src.astype('uint8')
     tempOut = cv2.cvtColor(tempOut,cv2.COLOR_GRAY2BGR)
     src = cv2.cvtColor(src,cv2.COLOR_GRAY2BGR)
-    output_img = cv2.seamlessClone(src,tempOut,mask,(int(x),tempOut.shape[0]//2),cv2.NORMAL_CLONE) #cv2.MONOCHROME_TRANSFER also can
+    output_img = cv2.seamlessClone(src,tempOut,mask,(int(x),(U+D)//2),cv2.NORMAL_CLONE) #cv2.MONOCHROME_TRANSFER also can
     output_img = cv2.cvtColor(output_img,cv2.COLOR_BGR2GRAY)
     output_img = output_img.astype('float64')
     output = cp.array(output_img)
     return output
 
-def blendSeamlessCloneYCu(tempOut, align_output, y, h):
-    height_to_blend = math.floor(h*0.1)
+def blendSeamlessCloneYCu(tempOut, align_output, y, h, movementX, PoseDict):
+    height_to_blend = math.floor(h*0.015)
+    if movementX[0] == "Left":
+        L = movementX[1] + PoseDict["Right"]
+        R = align_output.shape[1] - PoseDict["Left"]
+    else:
+        L = PoseDict["Right"]
+        R = align_output.shape[1] - movementX[1]    
+
     if h-height_to_blend < 0:
         height_to_blend = y;
-    if y+height_to_blend >= h:
-        height_to_blend = h-y;
-    src = align_output[int(y)-height_to_blend:int(y)+height_to_blend,:]
+    if y+height_to_blend >= align_output.shape[0]:
+        height_to_blend = align_output.shape[0]-y;
+
+    src = align_output[int(y)-height_to_blend:int(y)+height_to_blend,L:R]
     mask = 255*np.ones(src.shape, np.uint8)
     tempOut = cp.asnumpy(tempOut)
     tempOut = tempOut.astype('uint8')
@@ -490,14 +547,87 @@ def blendSeamlessCloneYCu(tempOut, align_output, y, h):
     src = src.astype('uint8')
     tempOut = cv2.cvtColor(tempOut,cv2.COLOR_GRAY2BGR)
     src = cv2.cvtColor(src,cv2.COLOR_GRAY2BGR)
-    output_img = cv2.seamlessClone(src,tempOut,mask,(tempOut.shape[1]//2, int(y)),cv2.NORMAL_CLONE) #cv2.MONOCHROME_TRANSFER also can
+    output_img = cv2.seamlessClone(src,tempOut,mask,((L+R)//2, int(y)),cv2.NORMAL_CLONE) #cv2.MONOCHROME_TRANSFER also can
     output_img = cv2.cvtColor(output_img,cv2.COLOR_BGR2GRAY)
     output_img = output_img.astype('float64')
     output = cp.array(output_img)
+    return output
+
+def blendAlphaXCu(align_img1, align_output, x, w, movementY, PoseDict):
+    width_to_blend = math.floor(w*0.1)
+    if movementY[0] == "UP":
+        U = movementY[1] + PoseDict["Down"]
+        D = align_output.shape[0] - PoseDict["UP"]
+    else:
+        U = PoseDict["Down"]
+        D = align_output.shape[0] - movementY[1]
+
+    if x-width_to_blend < 0:
+        width_to_blend = x;
+    if x+width_to_blend >= align_output.shape[1]:
+        width_to_blend = align_output.shape[1]-x;
+    
+    src = align_output[U:D,int(x):int(x)+width_to_blend]
+    src_shape = src.shape
+    
+    target = align_img1[U:D,:src_shape[1]]
+    target_shape = target.shape
+    
+    #mask1 = np.repeat(np.tile(np.linspace(1, 0, overlap1.shape[1]), (overlap1.shape[0], 1))[:, :, np.newaxis], 3, axis=2)
+    #mask2 = np.repeat(np.tile(np.linspace(0, 1, overlap2.shape[1]), (overlap2.shape[0], 1))[:, :, np.newaxis], 3, axis=2)
+    mask1 = cp.linspace(1, 0, src_shape[1])
+    mask2 = 1-mask1
+    final = src * mask1 + target * mask2
+    
+    output = cp.hstack([align_output[:,:x],align_img1])
+    output[U:D,int(x):int(x)+src_shape[1]] = final
+   
+    return output
+
+def blendAlphaYCu(align_img1, align_output, y, h, movementX, PoseDict, PrevPoseDict):
+    height_to_blend = math.floor(h*0.1)
+    ignorePrev = max(PoseDict["Down"],PoseDict["Up"])
+    ignorePrev = ignorePrev if ignorePrev <= 10 else ignorePrev-10
+    if movementX[0] == "Left":
+        L = movementX[1] + PoseDict["Right"]
+        R = align_output.shape[1] - PoseDict["Left"]
+    else:
+        L = PoseDict["Right"]
+        R = align_output.shape[1] - movementX[1]
+
+    if h-height_to_blend < 0:
+        height_to_blend = y;
+    if y+height_to_blend >= align_output.shape[0]:
+        height_to_blend = align_output.shape[0]-y;
+    
+    src = align_output[int(y):int(y)+height_to_blend,L:R]
+    src_shape = src.shape
+    
+    target = align_img1[:src_shape[0],L:R]
+    
+    mask1 = cp.swapaxes(cp.tile(cp.linspace(1, 0, src_shape[0]), (src_shape[1], 1)),0,1)
+    mask1 = getBlackMask(src,mask1,ignorePrev,src_shape[0])
+    mask2 = 1-mask1
+    
+    final = src * mask1 + target * mask2
+    output = cp.vstack([align_output[:y,:],align_img1])
+    output[int(y):int(y)+height_to_blend,L:R] = final
     return output
 
 #  ======================================================== Others ==================================================================
-
+def getBlackMask(img,mask,ignorePrev,h):
+    '''
+    _, alpha = cv2.threshold(img_gray, 0, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(alpha, cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+    alpha = np.zeros(alpha.shape, dtype=np.uint8)
+    alpha = cv2.fillPoly(alpha,[contours[-1]],(255),1)
+    '''
+    alpha = img[h-ignorePrev:]<=1
+    temp = mask[h-ignorePrev:]
+    temp[alpha] = 0
+    mask[h-ignorePrev:] = temp
+    return mask
+    
 def prepareImages(path = None, gray = False):
     if path is None:
         selection = askSelection("Folder or Images?",["Folder","Images"],"Select Input Types",0)
@@ -509,6 +639,7 @@ def prepareImages(path = None, gray = False):
                 return None,None
         else:
             imgs_list = filedialog.askopenfilenames()
+            path = imgs_list
             
         
     if selection == "Folder":    
@@ -559,6 +690,13 @@ def imageResize(image, width = None, height = None, inter = cv2.INTER_AREA):
 
     # return the resized image
     return resized
+
+def equaliseCupyImage(image_gray):
+    image_gray = cp.asnumpy(image_gray)
+    image_gray = image_gray.astype('uint8')
+    image_gray = clahe.apply(image_gray)
+    image_gray = image_gray.astype('float64')
+    return cp.asarray(image_gray)
 
 def showCupyImage(name, img, height = 400, width = None):
     imgNUMPY = cp.asnumpy(img)
@@ -647,8 +785,8 @@ def getInputInfo():
     # Declare Variable
     checkYAlignmentPercent = 0
     checkXAlignmentPercent = 0
-    overlapPercentageTB = 0  
-    overlapPercentageLR = 0
+    overlapPercentageTB = 0.015 
+    overlapPercentageLR = 0.015
 
     # Set Col Num and Row Num
     while True:
@@ -682,7 +820,7 @@ def getInputInfo():
     if ImgsCols > 1:
         while True:
             overlapPercentageLR = simpledialog.askfloat("Left-Right Overlap", "Enter the percentage of overlap (left-right):",
-                                                        initialvalue=0.3,
+                                                        initialvalue=0.2,
                                                         minvalue=0.1,
                                                         maxvalue=0.9)
             if overlapPercentageLR is None:
@@ -750,45 +888,118 @@ def getInputInfo():
 # ===================================================================================================================================
 
 def main():
-    try:
-        status, (inputPath, imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentageTB, checkXAlignmentPercent, checkYAlignmentPercent, selection, saveInfo) = getInputInfo()
+    #try:
+    status, (inputPath, imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentageTB, checkXAlignmentPercent, checkYAlignmentPercent, selection, saveInfo) = getInputInfo()
     
-        if not status:
-            return
+    if not status:
+        return
     
-        startTime = time.time()
+    startTime = time.time()
     
-        if selection.startswith('Numpy'):
-                output = numpyStitch(imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentageTB, checkYAlignmentPercent, checkXAlignmentPercent)
-        elif selection.startswith('Cupy'):
-                output = cupyStitch(imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentageTB, checkYAlignmentPercent, checkXAlignmentPercent)
+    if selection.startswith('Numpy'):
+            output = numpyStitch(imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentageTB, checkYAlignmentPercent, checkXAlignmentPercent)
+    elif selection.startswith('Cupy'):
+            output = cupyStitch(imgs, ImgsRows, ImgsCols, overlapPercentageLR, overlapPercentageTB, checkYAlignmentPercent, checkXAlignmentPercent)
         
-        endTime = time.time()
-        processTime = endTime - startTime
-        print("Process Time:", str(processTime))
+    endTime = time.time()
+    processTime = endTime - startTime
+    print("Process Time:", str(processTime))
     
-        if saveInfo is not None:
-            if output is None:
-                messagebox.showerror("None","Output is None")
-                return
-            if selection.startswith('Cupy'):
-                output = cp.asnumpy(output)
-                output = output.astype('uint8')
-            cv2.imwrite(saveInfo,output)
-            saveStitchedImageJSON(inputPath, saveInfo, 
-                                  overlapPercentageLR, 
-                                  overlapPercentageTB, 
-                                  checkYAlignmentPercent, 
-                                  checkXAlignmentPercent, 
-                                  ImgsRows, ImgsCols, 
-                                  PoseDictList,
-                                  OverlapXIndexList,OverlapYIndexList,
-                                  ProcessTimeList, processTime)
-        messagebox.showinfo("Complete","Process Completed.")
-    except Exception as e:
-        messagebox.showinfo("Exception",e)
+    if saveInfo is not None:
+        if output is None:
+            messagebox.showerror("None","Output is None")
+            return
+        if selection.startswith('Cupy'):
+            output = cp.asnumpy(output)
+            output = output.astype('uint8')
+        cv2.imwrite(saveInfo,output,[int(cv2.IMWRITE_PNG_COMPRESSION), 9])
+        saveStitchedImageJSON(inputPath, saveInfo, 
+                                overlapPercentageLR, 
+                                overlapPercentageTB, 
+                                checkYAlignmentPercent, 
+                                checkXAlignmentPercent, 
+                                ImgsRows, ImgsCols, 
+                                PoseDictList,
+                                OverlapXIndexList,OverlapYIndexList,
+                                ProcessTimeList, processTime)
+    messagebox.showinfo("Complete","Process Completed.")
+    #except Exception as e:
+       # messagebox.showinfo("Exception",e)
 
 # ===================================================================================================================================
 
-for i in range(0,33):
-    main()
+minOverlap = 0.015
+st = time.time()
+PoseDictList = []
+ProcessTimeList = []
+OverlapXIndexList = []
+OverlapYIndexList = []
+processedRow = 0
+processedCol = 0
+clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(5,5))
+
+"""
+im1 = np.float32(im1)
+im2 = np.float32(im2)
+im1 /= 255.0
+im2 /= 255.0
+
+mask1 = np.full(im1.shape[:2], 255, dtype=np.uint8)
+mask2 = np.full(im2.shape[:2], 255, dtype=np.uint8)
+
+c1 = (0,0)
+c2 = (0,4425)
+
+finder = cv2.detail.SeamFinder.createDefault(cv2.detail.SEAM_FINDER_DP_SEAM)
+
+seq = finder.find([im1, im2], [c1, c2], [mask1, mask2])
+
+im1 = cv2.cvtColor(im1,cv2.COLOR_BGR2GRAY)
+im2 = cv2.cvtColor(im2,cv2.COLOR_BGR2GRAY)
+
+m1 = cv2.UMat.get(seq[0])
+m1 = m1.astype('float32')
+m2 = cv2.UMat.get(seq[1])
+m2 = m2.astype('float32')
+
+w = im1.shape[1]
+h = im1.shape[0]
+
+output1 = np.full((h,w),0)
+output1[m1==255] = im1[m1==255]*255.0
+
+temp = np.full((4425,w),0)
+output1 = np.vstack([output1,temp])
+im1 = np.vstack([im1,temp])
+im2 = np.vstack([temp,im2])
+temp2 = np.full((4425,w),0)
+m2 = np.vstack([temp2,m2])
+m1 = np.vstack([m1,temp2])
+
+output2 = np.full((h,w),0)
+output2 = np.vstack([temp,output2])
+output2[m2==255] = im2[m2==255]*255.0
+
+height = 5120-4432
+mask = m1[4432-height:4432+height,:]
+mask = cv2.GaussianBlur(mask,(5,5),height,sigmaY=height)
+
+cv2.imshow("mask1",imageResize(mask,height=500))
+m1[4432-height:4432+height,:] = mask
+cv2.imshow("m1",imageResize(m1,height=500))
+
+'''
+temp = np.full((h,4432,3),150,dtype=np.uint8)
+print(output.shape, temp.shape)
+output = np.hstack([output,temp])
+im2 = np.hstack([temp,im2])
+temp2 = np.full((h,4432),150,dtype=np.uint8)
+m2 = np.hstack([temp2,m2])
+output[m2==255] = im2[m2==255]*255.0'''
+output1 = (output1*(m1)+(1-m1))
+#output2 = output2*(1-mask)+(mask)
+#output = (output1+output2)/255
+cv2.imshow("output",imageResize(output1,height=900))
+#"""
+
+main()
