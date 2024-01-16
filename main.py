@@ -1,14 +1,10 @@
 import gc
-from re import S
-import numpy as np
 import cupy as cp
 import cv2
 import time
 import os
 from tkinter import filedialog, simpledialog,messagebox,Label,Tk,Button,IntVar,Radiobutton
 import json
-from cupyx.scipy import ndimage
-from numpy.core.multiarray import ndarray
 from Stitch import StitchBase
 from cupyStitch import cupyStitch
 

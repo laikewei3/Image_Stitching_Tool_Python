@@ -3,7 +3,6 @@ from tkinter import messagebox
 import cupy as cp
 import cv2
 import time
-from cupyx.scipy import ndimage
 from Stitch import StitchBase
 
 class cupyStitch(StitchBase):
