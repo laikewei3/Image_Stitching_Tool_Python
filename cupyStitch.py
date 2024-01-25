@@ -43,9 +43,6 @@ class cupyStitch(StitchBase):
                     tmpUP = cp.zeros((PoseDict["Up"],w))
                     tmpDOWN = cp.zeros((PoseDict["Down"],w))
             
-                    #tmpDOWN[:] = cp.mean(img1[:PoseDict["Down"]],axis=0)
-                    #tmpUP[:] = cp.mean(img1[img1.shape[0]-PoseDict["Up"]:],axis=0)
-            
                     img1_processed = cp.vstack([tmpDOWN,img1,tmpUP])
                     h = img1_processed.shape[0]
             
@@ -76,8 +73,8 @@ class cupyStitch(StitchBase):
                     checkYAlignmentCnt = int(h*self.checkYAlignmentPercent)
                     checkYAlignmentCnt = 1 if checkYAlignmentCnt == 0 else checkYAlignmentCnt
                     x, align_img1, align_output, movementY = self.findHOverlapNotAlignIndex(output, img1_processed, img1_left_pixel, 
-                                                                              img0_right_cnt, checkYAlignmentCnt,
-                                                                              img0_right_index, PoseDict)
+                                                                                img0_right_cnt, checkYAlignmentCnt,
+                                                                                img0_right_index, PoseDict)
                     
                     checkYAlignmentCnt = output = img1_processed = img1_left_pixel = value = img0_right_cnt = img0_right_index = None   
                     gc.collect()
@@ -124,9 +121,9 @@ class cupyStitch(StitchBase):
                     checkXAlignmentCnt = int(width*self.checkXAlignmentPercent)
                     checkXAlignmentCnt = 1 if checkXAlignmentCnt == 0 else checkXAlignmentCnt
                     y, align_img1, align_output, movementX = self.findVOverlapNotAlignIndex(PrevOutput, output_processed, 
-                                                                              img1_top_pixel, img0_bottom_cnt, 
-                                                                              checkXAlignmentCnt, 
-                                                                              img0_bottom_index, PoseDict)
+                                                                                img1_top_pixel, img0_bottom_cnt, 
+                                                                                checkXAlignmentCnt, 
+                                                                                img0_bottom_index, PoseDict)
                     
                     checkXAlignmentCnt = width = img1_top_pixel = value = img0_bottom_cnt = img0_bottom_index = None
             
@@ -144,6 +141,7 @@ class cupyStitch(StitchBase):
                 self.ProcessTimeList.append(et-st)
                 st = time.time()
                 self.processedRow += 1
+                st = et = None
                 gc.collect()
                 self.mempool.free_all_blocks()
                 self.pinned_mempool.n_free_blocks()
@@ -151,8 +149,7 @@ class cupyStitch(StitchBase):
             messagebox.showinfo("Exception",e)
             if output is not None:
                 return output
-        finally:
-            return PrevOutput
+        return PrevOutput
     
     '''
     |          :             |
@@ -170,7 +167,7 @@ class cupyStitch(StitchBase):
         print("Finding X Overlap using Cuda......")
         
         shape = img1_left.shape
-        for x in range(min_overlap_count, img0_right_cnt - img1_left_pixel):
+        for x in range(0, img0_right_cnt - img1_left_pixel - min_overlap_count):
             img = output_right[:,x:x+img1_left_pixel]
             
             # Use every pixel will slow down the process, just use part of it -> 1 image has around 5000 pixel per row, so i also choose <= 5000
@@ -184,10 +181,10 @@ class cupyStitch(StitchBase):
             img1Half = img1_left[::step]
             diff = imgHalf - img1Half
             sum_sqdif = cp.sum(diff*diff)
-            sqdif_arr[x-min_overlap_count] = sum_sqdif
+            sqdif_arr[x] = sum_sqdif
         print()
         
-        index = int(cp.where(sqdif_arr == sqdif_arr.min())[0][0]) + min_overlap_count
+        index = int(cp.where(sqdif_arr == sqdif_arr.min())[0][0])# + min_overlap_count
     
         # Clear memory
         img = step = img1Half = imgHalf = diff = sum_sqdif = sqdif_arr = None
@@ -214,7 +211,7 @@ class cupyStitch(StitchBase):
         
         print("Finding Y Overlap using Cuda......")
         shape = img1_top.shape
-        for y in range(min_overlap_count, img0_bottom_cnt - img1_top_pixel):
+        for y in range(0, img0_bottom_cnt - img1_top_pixel - min_overlap_count):
             img = output_bottom[y:y+img1_top_pixel]
             
             # Use every pixel will slow down the process, just use part of it -> 1 image has around 5000 pixel per row, so i also choose <= 5000
@@ -228,10 +225,10 @@ class cupyStitch(StitchBase):
             img1Half = img1_top[:,::step]
             diff = imgHalf - img1Half
             sum_sqdif = cp.sum(diff*diff)
-            sqdif_arr[y+min_overlap_count] = sum_sqdif
+            sqdif_arr[y] = sum_sqdif
         print()
         
-        index = int(cp.where(sqdif_arr == sqdif_arr.min())[0][0])+min_overlap_count
+        index = int(cp.where(sqdif_arr == sqdif_arr.min())[0][0])#+min_overlap_count
         
         # Clear memory
         img = imgHalf = img1Half = diff = sum_sqdif = sqdif_arr = shape = None
@@ -318,8 +315,6 @@ class cupyStitch(StitchBase):
             v = index-check_y_align_pixel_cnt
             temp1 = cp.zeros((v,img1.shape[1]))
             temp2 = cp.zeros((v,output.shape[1]))
-            #temp1[:] = cp.mean(img1[img1.shape[0]-v:],axis=0) + 10
-            #temp2[:] = cp.mean(output[:v],axis=0) + 10
             align_img1 = cp.vstack([img1,temp1])
             align_output = cp.vstack([temp2,output])
             PoseDict["Up"] += v
@@ -328,8 +323,6 @@ class cupyStitch(StitchBase):
         else:
             temp1 = cp.zeros((index,img1.shape[1]))
             temp2 = cp.zeros((index,output.shape[1]))
-            #temp1[:] = cp.mean(img1[:index],axis=0) + 10
-            #temp2[:] = cp.mean(output[output.shape[0]-index:],axis=0) + 10
             align_img1 = cp.vstack([temp1,img1])
             align_output = cp.vstack([output,temp2])
             PoseDict["Down"] += index
@@ -377,12 +370,12 @@ class cupyStitch(StitchBase):
                 img1LEFT = cp.hstack([img1LEFT,temp])
                 temp = None
                 
-            # Calculate the best X overlap index when img1 move RIGHT
+            # Calculate the best Y overlap index when img1 move RIGHT
             output_bottom_LEFT = output_bottom[:,j:]
             img1RIGHT_LEFT = img1RIGHT[:,j:]
             yRIGHT = self.findVOverlapIndex(output_bottom_LEFT, img1RIGHT_LEFT, img1_top_pixel, img0_bottom_cnt)+img0_bottom_index
             
-            # Calculate the best X overlap index when img1 move LEFT
+            # Calculate the best Y overlap index when img1 move LEFT
             output_bottom_RIGHT = output_bottom[:,:w-j]
             img1LEFT_RIGHT = img1LEFT[:,:w-j]
             yLEFT = self.findVOverlapIndex(output_bottom_RIGHT, img1LEFT_RIGHT, img1_top_pixel, img0_bottom_cnt)+img0_bottom_index
@@ -446,20 +439,8 @@ class cupyStitch(StitchBase):
         self.pinned_mempool.n_free_blocks()
         return y, align_img1, align_output, movement
 
-    '''
-    SRC:
-    0      10      5       15      20    30  
-    0      10      15      30      20    35
-           U       U       D       U     D
-           10      5       15      5     15
-           U10     U15     U15     U20   U20   
-           D0      D0      D15     D15   D30	
-
-    U - WHEN U, U CURR + D TOTAL; WHEN D, D TOTAL
-    D - WHEN D, D CURR + U TOTAL; WHEN U, U TOTAL
-
-    '''
     def blendAlphaX(self, align_img1, align_output, x, w, movementY, PoseDict):
+        print("Blending....X")
         width_to_blend = int(w*0.1)
         # Ignore the part added manually for alignment to prevent color errors caused by blending
         if movementY[0] == "UP":
@@ -470,12 +451,10 @@ class cupyStitch(StitchBase):
             D = align_output.shape[0] - movementY[1]
         
         # To makesure the width to blend the alpha will not exceed the image width
-        if x-width_to_blend < 0:
-            width_to_blend = x;
         if x+width_to_blend >= align_output.shape[1]:
             width_to_blend = align_output.shape[1]-x;
         
-        src = align_output[U:D,int(x):int(x)+int(w*0.1)]
+        src = align_output[U:D,int(x):int(x)+width_to_blend]
         src_shape = src.shape
         target = align_img1[U:D,:src_shape[1]]
         
@@ -504,6 +483,7 @@ class cupyStitch(StitchBase):
         return output
 
     def blendAlphaY(self, align_img1, align_output, y, h, movementX, PoseDict):
+        print("Blending....Y")
         height_to_blend = int(h*0.1)
         ignoreCurr = max(PoseDict["Down"],PoseDict["Up"])
         # Ignore the part added manually for alignment to prevent color errors caused by blending
@@ -515,8 +495,6 @@ class cupyStitch(StitchBase):
             R = align_output.shape[1] - movementX[1]
 
         # To makesure the height to blend the alpha will not exceed the image height or too small
-        if h-height_to_blend < 0:
-            height_to_blend = int(y);
         if y+height_to_blend > int(align_output.shape[0]):
             height_to_blend = int(align_output.shape[0]-y);
     
@@ -532,6 +510,9 @@ class cupyStitch(StitchBase):
         tempMask = None
         target = cp.vstack([temp[:height_to_blend],target])
         temp = None
+        
+        self.mempool.free_all_blocks()
+        self.pinned_mempool.n_free_blocks()
         
         # blend both image 
         final = src * mask1 + target * mask2
@@ -568,4 +549,3 @@ class cupyStitch(StitchBase):
         self.mempool.free_all_blocks()
         self.pinned_mempool.n_free_blocks()
         return cupyImage 
-

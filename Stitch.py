@@ -58,7 +58,6 @@ class StitchBase(object):
         resized = cv2.resize(image, dim, interpolation = inter)
         
         dim = None
-        (h, w) = None
         r = None
         gc.collect()
         # return the resized image
@@ -347,9 +346,7 @@ class StitchBase(object):
         index = int(np.where(sqdif_arr[:,0] == sqdif_arr[:,0].min())[0][0])
         x = sqdif_arr[index,1]
         
-        # Align the output images and img1 by stack the images with rectangle 
-        # filled with mean color <- to reduce difference during alpha blending 
-        # <- black color might cause faint black line after blending 
+        # Align the output images and img1 by stack the images with rectangle
         sqdif_arr = None
         movement = []
         if index >= check_y_align_pixel_cnt:
@@ -409,12 +406,12 @@ class StitchBase(object):
                 img1LEFT = np.hstack([img1LEFT,temp])
                 temp = None
                 
-            # Calculate the best X overlap index when img1 move RIGHT
+            # Calculate the best Y overlap index when img1 move RIGHT
             output_bottom_LEFT = output_bottom[:,j:]
             img1RIGHT_LEFT = img1RIGHT[:,j:]
             yRIGHT = self.findVOverlapIndex(output_bottom_LEFT, img1RIGHT_LEFT, img1_top_pixel, img0_bottom_cnt)+img0_bottom_index
             
-            # Calculate the best X overlap index when img1 move LEFT
+            # Calculate the best Y overlap index when img1 move LEFT
             output_bottom_RIGHT = output_bottom[:,:w-j]
             img1LEFT_RIGHT = img1LEFT[:,:w-j]
             yLEFT = self.findVOverlapIndex(output_bottom_RIGHT, img1LEFT_RIGHT, img1_top_pixel, img0_bottom_cnt)+img0_bottom_index
@@ -497,8 +494,6 @@ class StitchBase(object):
             D = align_output.shape[0] - movementY[1]
         
         # To makesure the width to blend the alpha will not exceed the image width
-        if x-width_to_blend < 0:
-            width_to_blend = x;
         if x+width_to_blend >= align_output.shape[1]:
             width_to_blend = align_output.shape[1]-x;
         
@@ -538,8 +533,6 @@ class StitchBase(object):
             R = align_output.shape[1] - movementX[1]
         
         # To makesure the height to blend the alpha will not exceed the image height or too small
-        if h-height_to_blend < 0:
-            height_to_blend = int(y);
         if y+height_to_blend > int(align_output.shape[0]):
             height_to_blend = int(align_output.shape[0]-y);
     
@@ -579,7 +572,4 @@ class StitchBase(object):
         image_gray_int_equalised = None
         gc.collect()
         return image_gray_float
-   
-
-
     

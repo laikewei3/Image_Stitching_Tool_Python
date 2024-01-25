@@ -251,6 +251,7 @@ def main():
             if selection.startswith('Cupy'):
                 output = cp.asnumpy(output)
                 output = output.astype('uint8')
+                
             cv2.imwrite(saveInfo,output,[int(cv2.IMWRITE_PNG_COMPRESSION), 9])
         
             saveStitchedImageJSON(inputPath, saveInfo, 
@@ -263,11 +264,9 @@ def main():
                                     Stool.OverlapXIndexList,Stool.OverlapYIndexList,
                                     Stool.ProcessTimeList, processTime)
         messagebox.showinfo("Complete","Process Completed.")
+        print("Process Time:", str(processTime))
     except Exception as e:
         messagebox.showinfo("Exception",e)
-    else:
-        print("Process Time:", str(processTime))
-    
 
 # ===================================================================================================================================
 if __name__ == '__main__':
